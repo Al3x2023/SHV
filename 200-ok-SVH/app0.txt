@@ -1,0 +1,113 @@
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+import face_recognition
+import os
+import io
+import mysql.connector
+from datetime import datetime
+from werkzeug.utils import secure_filename
+
+app = Flask(__name__)
+CORS(app)
+
+# Configuración de la base de datos
+db_config = {
+    'user': 'root',
+    'password': '',
+    'host': 'localhost',
+    'database': 'acceso',
+}
+
+def get_db_connection():
+    print("Obteniendo conexión a la base de datos...")
+    conn = mysql.connector.connect(**db_config)
+    if conn.is_connected():
+        print("Conectado a la base de datos.")
+    return conn
+
+UPLOAD_FOLDER = os.path.join(os.getcwd(), 'uploads')
+if not os.path.exists(UPLOAD_FOLDER):
+    os.makedirs(UPLOAD_FOLDER)
+    print(f"Creado directorio de subida de archivos: {UPLOAD_FOLDER}")
+else:
+    print(f"Usando directorio de subida de archivos existente: {UPLOAD_FOLDER}")
+
+@app.route('/api/imagenes', methods=['POST'])
+def upload_image():
+    print("Solicitud recibida para subir imagen.")
+    if 'image/jpeg' not in request.content_type:
+        print("Error: Formato de imagen no soportado.")
+        return jsonify({'error': 'Formato de imagen no soportado'}), 400
+
+    image_data = io.BytesIO(request.data)
+    image_data.seek(0)
+
+    timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+    filename = f'uploaded_image_{timestamp}.jpg'
+    filepath = os.path.join(UPLOAD_FOLDER, filename)
+    print(f"Guardando imagen recibida en: {filepath}")
+
+    with open(filepath, 'wb') as f:
+        f.write(image_data.read())
+    print("Imagen guardada exitosamente.")
+
+    image_valid, id_usuario = process_image(filepath)
+    print(f"Procesamiento de imagen completado. Resultado: {'Válida' if image_valid else 'Inválida'}")
+
+    if image_valid:
+        print("Imagen válida, activando servo y registrando acceso.")
+        registrar_acceso(id_usuario)
+        return jsonify({'message': 'Acceso concedido.', 'activate_servo': True}), 200
+    else:
+        print("Acceso denegado.")
+        return jsonify({'message': 'Acceso denegado.', 'activate_servo': False}), 200
+
+def process_image(filepath):
+    try:
+        print(f"Cargando y procesando imagen: {filepath}")
+        unknown_image = face_recognition.load_image_file(filepath)
+        unknown_encodings = face_recognition.face_encodings(unknown_image)
+        if not unknown_encodings:
+            print("No se encontraron caras en la imagen.")
+            return False, None
+
+        unknown_encoding = unknown_encodings[0]
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        print("Obteniendo rostros conocidos de la base de datos...")
+        cursor.execute("SELECT id_usuario, rostro FROM usuarios WHERE activo = TRUE")
+
+        for id_usuario, rostro in cursor:
+            if rostro is not None:
+                print(f"Procesando rostro del usuario {id_usuario}")
+                known_image = face_recognition.load_image_file(io.BytesIO(rostro))
+                known_encoding = face_recognition.face_encodings(known_image)[0]
+                results = face_recognition.compare_faces([known_encoding], unknown_encoding)
+                if results[0]:
+                    print(f"Usuario {id_usuario} reconocido.")
+                    return True, id_usuario
+
+        print("Ningún usuario reconocido en la imagen.")
+        return False, None
+    except Exception as e:
+        print(f"Error al procesar la imagen: {e}")
+        return False, None
+    finally:
+        cursor.close()
+        conn.close()
+
+def registrar_acceso(id_usuario):
+    print(f"Registrando acceso para el usuario {id_usuario}")
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    query = """INSERT INTO historial (fecha_hora, id_puerta, id_usuario)
+               VALUES (%s, %s, %s)"""
+    cursor.execute(query, (datetime.now(), 1, id_usuario))  # Asume id_puerta = 1 por defecto
+    conn.commit()
+    print("Acceso registrado en la base de datos.")
+    cursor.close()
+    conn.close()
+
+if __name__ == '__main__':
+    print("Iniciando servidor Flask...")
+    app.run(debug=True, host='0.0.0.0')
