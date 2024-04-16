@@ -1,13 +1,3 @@
-from flask import Flask, request, jsonify
-from flask_cors import CORS
-import face_recognition
-import os
-import io
-import mysql.connector
-from datetime import datetime
-from werkzeug.utils import secure_filename
-import base64
-from flask_bcrypt import Bcrypt
 
 def convert_blob_to_base64(blob_data):
     if blob_data:
@@ -240,3 +230,13 @@ def login():
 if __name__ == '__main__':
     print("Iniciando servidor Flask...")
     app.run(debug=True, host='0.0.0.0')
+"""from flask import Flask, request, jsonify
+from flask_cors import CORS
+import face_recognition
+import os
+import io
+import mysql.connector
+from datetime import datetime
+from werkzeug.utils import secure_filename
+import base64
+from flask_bcrypt import Bcrypt"""
